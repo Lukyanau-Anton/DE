@@ -1,0 +1,137 @@
+services:
+  postgres:
+    container_name: postgres
+    image: postgres:17.4
+    restart: always
+    ports:
+      - '5432:5432'
+    volumes:
+      - /Postgres/init-script.sql:/docker-entrypoint-initdb.d
+      - psql_data:/var/lib/postgresql/data
+    networks:
+      - analytics
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres_user -d postgres_db" ]
+      interval: 10s
+      timeout: 8s
+      retries: 5
+    environment:
+      POSTGRES_USER: '${POSTGRES_ADMIN}'
+      POSTGRES_PASSWORD: '${POSTGRES_PASSWORD}'
+      #POSTGRES_DB: '${POSTGRES_DB}'
+
+  clickhouse:
+    container_name: clickhouse
+    build:
+      context: Clickhouse
+      dockerfile: ./Dockerfile
+    restart: always
+    environment:
+      CLICKHOUSE_ADMIN_USER: '${CLICKHOUSE_ADMIN_USER}'
+      CLICKHOUSE_ADMIN_PASSWORD: '${CLICKHOUSE_ADMIN_PASSWORD}'
+    volumes:
+      - click_config:/etc/clickhouse-server/config.d/*.xml
+      - click_config:/etc/clickhouse-server/users.d/*.xml
+      - click_config:/etc/clickhouse-keeper/
+      - click_data:/var/lib/clickhouse/
+      - click_logs:/var/log/clickhouse-server/
+    networks:
+      - analytics
+
+  docker_user_code:
+    build:
+      context: Dagster/
+      dockerfile: ./Dockerfile_user_code
+    container_name: docker_example_user_code
+    image: docker_example_user_code_image
+    restart: always
+    environment:
+      DAGSTER_POSTGRES_USER: '${DAGSTER_USER}'
+      DAGSTER_POSTGRES_PASSWORD: '${DAGSTER_PASSWORD}'
+      DAGSTER_POSTGRES_DB: 'dagster'
+      DAGSTER_CURRENT_IMAGE: 'docker_example_user_code_image'
+    networks:
+      - analytics
+
+  docker_example_webserver:
+    build:
+      context: Dagster/
+      dockerfile: ./Dockerfile_dagster
+    entrypoint:
+      - dagster-webserver
+      - -h
+      - '0.0.0.0'
+      - -p
+      - '3000'
+      - -w
+      - workspace.yaml
+    container_name: docker_example_webserver
+    expose:
+      - '3000'
+    ports:
+      - '3000:3000'
+    environment:
+      DAGSTER_POSTGRES_USER: '${DAGSTER_USER}'
+      DAGSTER_POSTGRES_PASSWORD: '${DAGSTER_PASSWORD}'
+      DAGSTER_POSTGRES_DB: 'dagster'
+    volumes:
+      - dagster_webserver_data:/var/run/docker.sock
+      - dagster_webserver_data:/tmp/io_manager_storage
+    networks:
+      - analytics
+    depends_on:
+      postgres:
+        condition: service_healthy
+      docker_user_code:
+        condition: service_started
+
+  docker_example_daemon:
+    build:
+      context: Dagster/
+      dockerfile: ./Dockerfile_dagster
+    entrypoint:
+      - dagster-daemon
+      - run
+    container_name: docker_example_daemon
+    restart: on-failure
+    environment:
+      DAGSTER_POSTGRES_USER: '${DAGSTER_USER}'
+      DAGSTER_POSTGRES_PASSWORD: '${DAGSTER_PASSWORD}'
+      DAGSTER_POSTGRES_DB: 'dagster'
+    volumes:
+      - dagster_daemon_data:/var/run/docker.sock
+      - dagster_daemon_data:/tmp/io_manager_storage
+    networks:
+      - analytics
+    depends_on:
+      postgres:
+        condition: service_healthy
+      docker_user_code:
+        condition: service_started
+
+  grafana:
+    build:
+      context: .
+      dockerfile: grafana/Dockerfile
+    environment:
+      GF_SECURITY_ADMIN_USER: '${GRAFANA_USER}'
+      GF_SECURITY_ADMIN_PASSWORD: '${GRAFANA_PASSOWORD}'
+    volumes:
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3001:3000"
+    depends_on:
+      - clickhouse
+
+volumes:
+  psql_data:
+  click_data:
+  click_config:
+  click_logs:
+  dagster_daemon_data:
+  dagster_webserver_data:
+  grafana_data:
+
+networks:
+  analytics:
+    driver: bridge

@@ -1,0 +1,8 @@
+CREATE DATABASE dagster;
+CREATE DATABASE analytics;
+
+CREATE USER dagster_user WITH ENCRYPTED PASSWORD '123qwe$%^';
+CREATE USER analytics_user WITH ENCRYPTED PASSWORD 'zxc!@#asd';
+
+GRANT ALL PRIVILEGES ON DATABASE dagster TO dagster_user;
+GRANT ALL PRIVILEGES ON DATABASE analytics TO analytics_user;
